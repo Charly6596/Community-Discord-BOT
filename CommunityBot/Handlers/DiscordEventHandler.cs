@@ -1,7 +1,11 @@
-using System;
+﻿using System;
+using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using CommunityBot.Configuration;
 using CommunityBot.Features;
+using CommunityBot.Features.Lists;
+using CommunityBot.Features.Onboarding;
 using CommunityBot.Features.Trivia;
 using CommunityBot.Helpers;
 using CommunityBot.Modules;
@@ -23,14 +27,18 @@ namespace CommunityBot.Handlers
         private readonly ApplicationSettings _applicationSettings;
         private readonly Logger _logger;
         private readonly TriviaGames _triviaGames;
+        private readonly ListManager _listManager;
+        private readonly IOnboarding _onboarding;
 
-        public DiscordEventHandler(Logger logger, TriviaGames triviaGames, DiscordSocketClient client, CommandHandler commandHandler, ApplicationSettings applicationSettings)
+        public DiscordEventHandler(Logger logger, TriviaGames triviaGames, DiscordSocketClient client, CommandHandler commandHandler, ApplicationSettings applicationSettings, ListManager listManager, IOnboarding onboarding)
         {
             _logger = logger;
             _client = client;
             _commandHandler = commandHandler;
             _applicationSettings = applicationSettings;
             _triviaGames = triviaGames;
+            _listManager = listManager;
+            _onboarding = onboarding;
         }
 
         public void InitDiscordEvents()
@@ -138,6 +146,7 @@ namespace CommunityBot.Handlers
 
         private async Task JoinedGuild(SocketGuild guild)
         {
+            _onboarding.JoinedGuild(guild);
             ServerBots.JoinedGuild(guild);
         }
 
@@ -175,7 +184,6 @@ namespace CommunityBot.Handlers
         {
             _commandHandler.HandleCommandAsync(message);
             MessageRewardHandler.HandleMessageRewards(message);
-            
         }
 
         private async Task MessageUpdated(Cacheable<IMessage, ulong> cacheMessageBefore, SocketMessage messageAfter, ISocketMessageChannel channel)
@@ -185,7 +193,12 @@ namespace CommunityBot.Handlers
 
         private async Task ReactionAdded(Cacheable<IUserMessage, ulong> cacheMessage, ISocketMessageChannel channel, SocketReaction reaction)
         {
-            if (reaction.User.Value.IsBot) return;
+            if (reaction.User.Value.IsBot) { return; }
+            
+            var user = _client.Guilds.First().GetUser(reaction.UserId);
+            var roleIds = user.Roles.Select(r => r.Id).ToArray();
+            (new ListReactionHandler()).HandleReactionAdded(new ListHelper.UserInfo(user.Id, roleIds), _listManager, cacheMessage, reaction);
+
             _triviaGames.HandleReactionAdded(cacheMessage, reaction);
             BlogHandler.ReactionAdded(reaction);
         }

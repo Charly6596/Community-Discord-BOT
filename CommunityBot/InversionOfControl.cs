@@ -1,9 +1,11 @@
 using CommunityBot.Configuration;
 using CommunityBot.Features.Trivia;
 using CommunityBot.Handlers;
+using CommunityBot.Features.Lists;
 using Discord.Commands;
 using Discord.WebSocket;
 using Lamar;
+using CommunityBot.Features.Onboarding;
 
 namespace CommunityBot
 {
@@ -37,12 +39,16 @@ namespace CommunityBot
                 // c.ForSingletonOf<ConnectionService>().UseIfNone<DiscordConnectionService>();
                 // c.ForSingletonOf<DiscordSocketClient>().UseIfNone<DiscordSocketClient>();
                 c.ForSingletonOf<Logger>().UseIfNone<Logger>();
-                c.ForSingletonOf<TriviaGame>().UseIfNone<TriviaGame>();
+                c.ForSingletonOf<TriviaGames>().UseIfNone<TriviaGames>();
                 c.ForSingletonOf<DiscordEventHandler>().UseIfNone<DiscordEventHandler>();
                 c.ForSingletonOf<CommandHandler>().UseIfNone<CommandHandler>();
                 c.ForSingletonOf<CommandService>().UseIfNone<CommandService>();
                 c.ForSingletonOf<DiscordSocketClient>().UseIfNone(DiscordClientFactory.GetBySettings(settings));
                 c.ForSingletonOf<ApplicationSettings>().UseIfNone(settings);
+                c.ForSingletonOf<IDataStorage>().UseIfNone<JsonDataStorage>();
+                c.ForSingletonOf<ListManager>().UseIfNone<ListManager>();
+                c.ForSingletonOf<IOnboarding>().UseIfNone<Onboarding>();
+                c.ForSingletonOf<Features.Onboarding.Tasks.HelloWorldTask>().UseIfNone<Features.Onboarding.Tasks.HelloWorldTask>();
             });
         }
     }

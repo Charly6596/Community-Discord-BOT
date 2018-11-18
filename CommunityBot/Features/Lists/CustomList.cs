@@ -3,98 +3,189 @@ using System.Collections.Generic;
 using System.Text;
 using CommunityBot.Configuration;
 using System.IO;
+using Discord.WebSocket;
+using System.Linq;
+using Discord;
+using static CommunityBot.Helpers.ListHelper;
 
 namespace CommunityBot.Features.Lists
 {
-    public class CustomList
+    public class CustomList : IEquatable<object>
     {
-        public String name { get; set; }
-        public List<String> contents { get; set; }
+        public string Name { get; set; }
+        public List<String> Contents { get; set; }
+        public ulong OwnerId { get; set; }
+        public Dictionary<ulong, ListPermission> PermissionByRole { get; } = new Dictionary<ulong, ListPermission>();
 
-        public CustomList(String name)
+        private IDataStorage dataStorage;
+
+        public CustomList(IDataStorage dataStorage, UserInfo userInfo, ListPermission permission, String name)
         {
-            this.name = name;
-            contents = new List<string>();
+            this.dataStorage = dataStorage;
+            this.OwnerId = userInfo.Id;
+            this.Name = name;
+
+            if (userInfo.RoleIds != null)
+            {
+                PermissionByRole.Add(userInfo.RoleIds.First(), permission);
+            }
+            Contents = new List<string>();
+        }
+
+        public void SetDataStorage(IDataStorage dataStorage)
+        {
+            this.dataStorage = dataStorage;
+        }
+
+        public bool SetPermissionByRole(ulong roleId, ListPermission permission)
+        {
+            if (PermissionByRole.ContainsKey(roleId))
+            {
+                if (PermissionByRole[roleId] == permission) { return false; }
+
+                PermissionByRole[roleId] = permission;
+            }
+            else
+            {
+                PermissionByRole.Add(roleId, permission);
+            }
+            SaveList();
+            return true;
+        }
+
+        public bool RemovePermissionByRole(ulong roleId)
+        {
+            if (!PermissionByRole.ContainsKey(roleId)) { return false; }
+            PermissionByRole.Remove(roleId);
+            SaveList();
+            return true;
+        }
+
+        public ListPermission GetPermissionByRole(ulong roleId)
+        {
+            if (!PermissionByRole.ContainsKey(roleId)) { return ListPermission.PRIVATE; }
+            return PermissionByRole[roleId];
         }
 
         public void Add(String item)
         {
-            contents.Add(item);
-            WriteContents();
+            Contents.Add(item);
+            SaveList();
         }
 
         public void AddRange(String[] collection)
         {
-            contents.AddRange(collection);
-            WriteContents();
+            Contents.AddRange(collection);
+            SaveList();
         }
 
         public void Insert(int index, String item)
         {
-            contents.Insert(index, item);
-            WriteContents();
+            Contents.Insert(index, item);
+            SaveList();
         }
 
         public void InsertRange(int index, String[] collection)
         {
-            contents.InsertRange(index, collection);
-            WriteContents();
+            Contents.InsertRange(index, collection);
+            SaveList();
         }
 
         public void Remove(String item)
         {
-            contents.Remove(item);
-            WriteContents();
+            Contents.Remove(item);
+            SaveList();
         }
 
         public void Clear()
         {
-            contents.Clear();
-            WriteContents();
+            Contents.Clear();
+            SaveList();
         }
 
         public int Count()
         {
-            return contents.Count;
+            return Contents.Count;
         }
 
         public void Delete()
         {
-            String resourceFolder = Constants.ResourceFolder;
-            String path = String.Concat(resourceFolder, "/", this.name, ".json");
+            string resourceFolder = Constants.ResourceFolder;
+            var path = String.Concat(resourceFolder, "/", this.Name, ".json");
             if (!File.Exists(path)) { return; }
             File.Delete(path);
         }
 
-        public void WriteContents()
+        public void SaveList()
         {
-            DataStorage.StoreObject(contents, this.name + ".json", false);
+            this.dataStorage.StoreObject(this, $"{this.Name}.json");
         }
 
-        public List<String> ReadContents()
+        public static CustomList RestoreList(IDataStorage dataStorage, string name)
         {
-            var list = DataStorage.RestoreObject<List<String>>(this.name + ".json");
-            if (list == null) { return null; }
-
-            this.contents = list;
-            return this.contents;
+            return dataStorage.RestoreObject<CustomList>($"{name}.json");
         }
 
         public bool EqualContents(List<String> list)
         {
-            if (this.contents.Count != list.Count) { return false; }
-            for (int i=0; i<this.contents.Count; i++)
+            if (this.Contents.Count != list.Count) { return false; }
+            for (int i = 0; i < this.Contents.Count; i++)
             {
-                if (!this.contents[i].Equals(list[i])) { return false; }
+                if (!this.Contents[i].Equals(list[i])) { return false; }
             }
             return true;
         }
 
         public override bool Equals(object obj)
         {
-            if (!(obj is CustomList)) { return false; }
-            CustomList comp = (CustomList)obj;
-            return (EqualContents(comp.contents) && comp.name.Equals(this.name));
+            return Equals(obj as CustomList);
+        }
+
+        public bool Equals(CustomList other)
+        {
+            if (other is null) { return false; }
+            return (other.Name.Equals(this.Name) && EqualContents(other.Contents));
+        }
+
+        public bool IsAllowedToList(UserInfo userInfo)
+        {
+            var validRoleIds = PermissionByRole
+                .Where(x => x.Value > ListPermission.PRIVATE)
+                .Select(x => x.Key);
+
+            return (ShareItem(userInfo.RoleIds, validRoleIds) || !(this.OwnerId != userInfo.Id && PermissionByRole.First().Value == ListPermission.PRIVATE));
+        }
+
+        public bool IsAllowedToRead(UserInfo userInfo)
+        {
+            var validRoleIds = PermissionByRole
+                .Where(x => x.Value > ListPermission.LIST)
+                .Select(x => x.Key);
+
+            return (ShareItem(userInfo.RoleIds, validRoleIds) || this.OwnerId == userInfo.Id);
+        }
+
+        public bool IsAllowedToWrite(UserInfo userInfo)
+        {
+            var validRoleIds = PermissionByRole
+                .Where(x => x.Value > ListPermission.READ)
+                .Select(x => x.Key);
+
+            return (ShareItem(userInfo.RoleIds, validRoleIds) || this.OwnerId == userInfo.Id);
+        }
+
+        public bool IsAllowedToModify(UserInfo userInfo)
+        {
+            return (userInfo.Id == this.OwnerId);
+        }
+
+        private bool ShareItem(IEnumerable<ulong> a, IEnumerable<ulong> b)
+        {
+            foreach (ulong l in a)
+            {
+                if (b.Contains(l)) { return true; }
+            }
+            return false;
         }
     }
 }
